@@ -23,6 +23,8 @@ contract CharityChain is Ownable {
         _;
     }
 
+    constructor() Ownable(msg.sender) {} // Добавляем вызов конструктора родительского контракта с текущим адресом в качестве владельца
+
     function donate(address _recipient) external payable onlyValidAddress(_recipient) {
         require(msg.value > 0, "Invalid donation amount");
 
