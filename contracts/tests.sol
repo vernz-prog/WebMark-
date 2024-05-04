@@ -1,103 +1,69 @@
-// SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.9;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
 
-interface IERC721 {
-    function transferFrom(address _from, address _to, uint _nftId) external;
-    function ownerOf(uint tokenId) external view returns (address owner);
-}
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-interface IERC20 {
-    function transferFrom(
-        address sender,
-        address recipient,
-        uint amount
-    ) external returns (bool); 
-}
+contract CharityChain is Ownable {
+    struct Donation {
+        address donor;
+        uint256 amount;
+        uint256 timestamp;
+    }
 
-contract DutchAuction {
+    mapping(address => uint256) private _balances;
+    mapping(address => Donation[]) private _donations;
 
-    IERC721 public immutable nft;
-    uint public immutable nftId;
-    IERC20 public immutable coin;
-    uint public immutable startingPrice;
-    uint public immutable discountRate;
-    uint public immutable duration;
+    event DonationReceived(address indexed donor, uint256 amount);
+    event FundsWithdrawn(address indexed recipient, uint256 amount);
+    event DonationClaimed(address indexed recipient, uint256 amount);
 
-    bool public isCancelled;
-    bool public isSold;
-    bool public isApproved;
-    uint public immutable startAt;
-    uint public immutable expiresAt;
-    address payable public immutable seller;
+    modifier onlyValidAddress(address _address) {
+        require(_address != address(0), "Invalid address");
+        _;
+    }
 
-    constructor(address _nft, uint _nftId, address _coin, uint _startingPrice, uint _endPrice, uint _duration) {
-        require(_startingPrice >= _endPrice, "starting price < min");    
-        seller = payable(msg.sender);
-        nft = IERC721(_nft);
-        require(nft.ownerOf(_nftId) == msg.sender, "you must be a NFT owner");
-        nftId = _nftId;
-        coin = IERC20(_coin);
-        startingPrice = _startingPrice;
-        duration = _duration * (1 hours);
-        startAt = block.timestamp;
-        expiresAt = block.timestamp + duration;
-        discountRate = (_startingPrice - _endPrice) / duration;
+    constructor() Ownable(msg.sender) payable {} // Добавляем вызов конструктора родительского контракта с текущим адресом в качестве владельца
+
+    function donate(address payable _recipient) external payable onlyValidAddress(_recipient) {
+        require(msg.value > 0, "Invalid donation amount");
+
+        _balances[_recipient] += msg.value;
+        _donations[_recipient].push(Donation(msg.sender, msg.value, block.timestamp));
+
+        emit DonationReceived(msg.sender, msg.value);
+    }
+
+    function withdrawFunds(uint256 _amount) external onlyOwner {
+        require(_amount > 0 && _amount <= address(this).balance, "Invalid withdrawal amount");
         
+        payable(owner()).transfer(_amount);
+
+        emit FundsWithdrawn(owner(), _amount);
     }
 
-    function getRemainingTime() external view returns (uint) {
-        uint timeStamp = block.timestamp;
-        if(timeStamp > expiresAt)
-            timeStamp = expiresAt;
-        return uint((expiresAt - timeStamp));
+    function getBalance(address _address) external view returns (uint256) {
+        return _balances[_address];
     }
 
-    function getPrice() public view returns (uint) {
-        uint timeElapsed = block.timestamp - startAt;
-        uint discount = discountRate * timeElapsed;
-        return startingPrice - discount;
+    function claimDonations() external onlyValidAddress(msg.sender) {
+        uint256 amount = _balances[msg.sender];
+        require(amount > 0, "No donations to claim");
+
+        _balances[msg.sender] = 0;
+        payable(msg.sender).transfer(amount);
+
+        emit DonationClaimed(msg.sender, amount);
     }
 
-    function getAddress() external view returns (address) {
-        return address(this);
+    function getDonationCount(address _address) external view returns (uint256) {
+        return _donations[_address].length;
     }
 
-    function buyWithNormal(uint amount) external {
-        require(block.timestamp < expiresAt, "auction expired");
-        require(!isCancelled, "auction is cancelled by NFT owner");
-        require(isApproved, "NFT is not approved to this contract");
-        uint price = getPrice();
-        require(amount >= price, "ETH < price");
-        isSold = true;
+    function getDonationDetails(address _address, uint256 _index) external view returns (address, uint256, uint256) {
+        require(_index < _donations[_address].length, "Invalid donation index");
 
-        nft.transferFrom(seller, msg.sender, nftId);
-        bool result = coin.transferFrom(msg.sender, seller, price);
-        require(result, "Failed to send Ether");
-    }
-
-    function buyWithNative() external payable {
-        require(block.timestamp < expiresAt, "auction expired");
-        require(!isCancelled, "auction is cancelled by NFT owner");
-        require(isApproved, "NFT is not approved to this contract");
-        uint price = getPrice();
-        require(msg.value >= price, "ETH < price");
-        isSold = true;
-
-        nft.transferFrom(seller, msg.sender, nftId);
-        uint refund = msg.value - price;
-        if (refund > 0) {
-            payable(msg.sender).transfer(refund);
-        }
-        seller.transfer(price);
-    }
-
-    function cancelAuction() external {
-        require(msg.sender == seller, "only NFT owner can call this function");
-        isCancelled = true;
-    }
-
-    function setApprovalState() external {
-        require(msg.sender == seller, "only NFT owner can call this function");
-        isApproved = true;
+        Donation memory donation = _donations[_address][_index];
+        return (donation.donor, donation.amount, donation.timestamp);
     }
 }
