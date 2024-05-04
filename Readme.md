@@ -20,3 +20,5 @@ CharityChain представляет собой инновационную бл
 В контракте также реализованы модификаторы безопасности и события для регистрации действий.
 Этот контракт не имеет привязки к какому-либо конкретному ERC-стандарту, но можно было бы расширить его функциональность, чтобы использовать стандарты ERC, такие как ERC20 для токенов или ERC721 для учета некоторых уникальных благотворительных предметов.
 Сыылка на документ смарт контракта **https://docs.google.com/document/d/1KVJUa2XmxODjNqFq47G1K_-uLTwIZKlk6WyOfFiGVKg/edit?usp=sharing**
+
+Ссылка на Figma **https://www.figma.com/file/HHU1RDyPYsfuopexRhfCNb/Untitled?type=design&node-id=0%3A1&mode=design&t=sWg4ANy9xvYH5N4D-1**
