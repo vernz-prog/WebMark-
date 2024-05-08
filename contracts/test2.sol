@@ -2,7 +2,7 @@ pragma solidity ^0.5.8;
 
 /// @title A contract that is able to facilitate donations to different charities
 /// whenever a user wants to make a transfer of funds to another user.
-contract Charitable {
+contract CharityChain {
     address payable owner;
     address payable[] charityAddresses;
     uint256 totalDonationsAmount;
