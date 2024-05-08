@@ -1,138 +1,131 @@
-// SPDX-License-Identifier: GPL-3.0
+pragma solidity ^0.5.8;
 
-pragma solidity >=0.7.0 <0.9.0;
+/// @title A contract that is able to facilitate donations to different charities
+/// whenever a user wants to make a transfer of funds to another user.
+contract Charitable {
+    address payable owner;
+    address payable[] charityAddresses;
+    uint256 totalDonationsAmount;
+    uint256 highestDonation;
+    address payable highestDonor;
 
-/** 
- * @title Ballot
- * @dev Implements voting process along with vote delegation
- */
-contract Ballot {
-   
-    struct Voter {
-        uint weight; // weight is accumulated by delegation
-        bool voted;  // if true, that person already voted
-        address delegate; // person delegated to
-        uint vote;   // index of the voted proposal
+    /// @param addresses_ The list of charity addresses to store in order to send donations to.
+    constructor(address payable[] memory addresses_) public {
+        owner = msg.sender;
+        charityAddresses = addresses_;
+        totalDonationsAmount = 0;
+        highestDonation = 0;
     }
 
-    struct Proposal {
-        // If you can limit the length to a certain number of bytes, 
-        // always use one of bytes1 to bytes32 because they are much cheaper
-        bytes32 name;   // short name (up to 32 bytes)
-        uint voteCount; // number of accumulated votes
+    /// Restricts the access only to the user who deployed the contract.
+    modifier restrictToOwner() {
+        require(msg.sender == owner, 'Method available only to the to the user that deployed the contract');
+        _;
     }
 
-    address public chairperson;
-
-    mapping(address => Voter) public voters;
-
-    Proposal[] public proposals;
-
-    /** 
-     * @dev Create a new ballot to choose one of 'proposalNames'.
-     * @param proposalNames names of proposals
-     */
-    constructor(bytes32[] memory proposalNames) {
-        chairperson = msg.sender;
-        voters[chairperson].weight = 1;
-
-        for (uint i = 0; i < proposalNames.length; i++) {
-            // 'Proposal({...})' creates a temporary
-            // Proposal object and 'proposals.push(...)'
-            // appends it to the end of 'proposals'.
-            proposals.push(Proposal({
-                name: proposalNames[i],
-                voteCount: 0
-            }));
-        }
-    }
-    
-    /** 
-     * @dev Give 'voter' the right to vote on this ballot. May only be called by 'chairperson'.
-     * @param voter address of voter
-     */
-    function giveRightToVote(address voter) public {
-        require(
-            msg.sender == chairperson,
-            "Only chairperson can give right to vote."
-        );
-        require(
-            !voters[voter].voted,
-            "The voter already voted."
-        );
-        require(voters[voter].weight == 0);
-        voters[voter].weight = 1;
+    /// Validates that the sender originated the transfer is different than the target destination.
+    modifier validateDestination(address payable destinationAddress) {
+        require(msg.sender != destinationAddress, 'Sender and recipient cannot be the same.');
+        _;
     }
 
-    /**
-     * @dev Delegate your vote to the voter 'to'.
-     * @param to address to which vote is delegated
-     */
-    function delegate(address to) public {
-        Voter storage sender = voters[msg.sender];
-        require(!sender.voted, "You already voted.");
-        require(to != msg.sender, "Self-delegation is disallowed.");
+    //// Validates that the charity index number provided is a valid one.
+    ///
+    /// @param charityIndex The target charity index to validate. Indexes start from 0 and increment by 1.
+    modifier validateCharity(uint256 charityIndex) {
+        require(charityIndex <= charityAddresses.length - 1, 'Invalid charity index.');
+        _;
+    }
 
-        while (voters[to].delegate != address(0)) {
-            to = voters[to].delegate;
+    /// Validates that the amount to transfer is not zero.
+    modifier validateTransferAmount() {
+        require(msg.value > 0, 'Transfer amount has to be greater than 0.');
+        _;
+    }
 
-            // We found a loop in the delegation, not allowed.
-            require(to != msg.sender, "Found loop in delegation.");
-        }
-        sender.voted = true;
-        sender.delegate = to;
-        Voter storage delegate_ = voters[to];
-        if (delegate_.voted) {
-            // If the delegate already voted,
-            // directly add to the number of votes
-            proposals[delegate_.vote].voteCount += sender.weight;
-        } else {
-            // If the delegate did not vote yet,
-            // add to her weight.
-            delegate_.weight += sender.weight;
+    /// Validates that the donated amount is within acceptable limits.
+    ///
+    /// @param donationAmount The target donation amount.
+    /// @dev donated amount >= 1% of the total transferred amount and <= 50% of the total transferred amount.
+    modifier validateDonationAmount(uint256 donationAmount) {
+        require(donationAmount >= msg.value / 100 && donationAmount <= msg.value / 2,
+            'Donation amount has to be from 1% to 50% of the total transferred amount');
+        _;
+    }
+
+    /// Transmits the address of the donor and the amount donated.
+    event Donation(
+        address indexed _donor,
+        uint256 _value
+    );
+
+    /// Redirects 10% of the total transferred funds to the target charity and transfers the rest to the target address.
+    /// Whenever a transfer of funds is complete, it emits the event `Donation`.
+    ///
+    /// @param destinationAddress The target address to send fund to.
+    /// @param charityIndex The target index of the charity to send the 10% of the funds.
+    function deposit(address payable destinationAddress, uint256 charityIndex) public validateDestination(destinationAddress)
+    validateTransferAmount() validateCharity(charityIndex) payable {
+        uint256 donationAmount = msg.value / 10;
+        uint256 actualDeposit = msg.value - donationAmount;
+
+        charityAddresses[charityIndex].transfer(donationAmount);
+        destinationAddress.transfer(actualDeposit);
+
+        emit Donation(msg.sender, donationAmount);
+
+        totalDonationsAmount += donationAmount;
+
+        if (donationAmount > highestDonation) {
+            highestDonation = donationAmount;
+            highestDonor = msg.sender;
         }
     }
 
-    /**
-     * @dev Give your vote (including votes delegated to you) to proposal 'proposals[proposal].name'.
-     * @param proposal index of proposal in the proposals array
-     */
-    function vote(uint proposal) public {
-        Voter storage sender = voters[msg.sender];
-        require(sender.weight != 0, "Has no right to vote");
-        require(!sender.voted, "Already voted.");
-        sender.voted = true;
-        sender.vote = proposal;
+    /// Redirects the specified amount to the target charity and transfers the rest to the target address.
+    /// Whenever a transfer of funds is complete, it emits the event `Donation`.
+    ///
+    /// @param destinationAddress The target address to send fund to.
+    /// @param charityIndex The target index of the charity to send the specified amount.
+    /// @param donationAmount The amount to send to the target charity.
+    function deposit(address payable destinationAddress, uint256 charityIndex, uint256 donationAmount) public
+    validateDestination(destinationAddress) validateTransferAmount() validateCharity(charityIndex)
+    validateDonationAmount(donationAmount) payable {
+        uint256 actualDeposit = msg.value - donationAmount;
 
-        // If 'proposal' is out of the range of the array,
-        // this will throw automatically and revert all
-        // changes.
-        proposals[proposal].voteCount += sender.weight;
-    }
+        charityAddresses[charityIndex].transfer(donationAmount);
+        destinationAddress.transfer(actualDeposit);
 
-    /** 
-     * @dev Computes the winning proposal taking all previous votes into account.
-     * @return winningProposal_ index of winning proposal in the proposals array
-     */
-    function winningProposal() public view
-            returns (uint winningProposal_)
-    {
-        uint winningVoteCount = 0;
-        for (uint p = 0; p < proposals.length; p++) {
-            if (proposals[p].voteCount > winningVoteCount) {
-                winningVoteCount = proposals[p].voteCount;
-                winningProposal_ = p;
-            }
+        emit Donation(msg.sender, donationAmount);
+
+        totalDonationsAmount += donationAmount;
+
+        if (donationAmount > highestDonation) {
+            highestDonation = donationAmount;
+            highestDonor = msg.sender;
         }
     }
 
-    /** 
-     * @dev Calls winningProposal() function to get the index of the winner contained in the proposals array and then
-     * @return winnerName_ the name of the winner
-     */
-    function winnerName() public view
-            returns (bytes32 winnerName_)
-    {
-        winnerName_ = proposals[winningProposal()].name;
+    /// Returns all the available charity addresses.
+    /// @return charityAddresses
+    function getAddresses() public view returns (address payable[] memory) {
+        return charityAddresses;
+    }
+
+    /// Returns the total amount raised by all donations (in wei) towards any charity.
+    /// @return totalDonationsAmount
+    function getTotalDonationsAmount() public view returns (uint256) {
+        return totalDonationsAmount;
+    }
+
+    /// Returns the address that made the highest donation, along with the amount donated.
+    /// @return (highestDonation, highestDonor)
+    function getHighestDonation() public view restrictToOwner() returns (uint256, address payable)  {
+        return (highestDonation, highestDonor);
+    }
+
+    // Destroys the contract and renders it unusable.
+    function destroy() public restrictToOwner() {
+        selfdestruct(owner);
     }
 }
